@@ -195,8 +195,8 @@ int RunQuery(ReadStats* stats, const std::string& source, const char* s3addr,
     con.Query("SET s3_region='us-east-1'");
     con.Query("SET s3_url_style='path'");
     con.Query("SET s3_use_ssl=false");
-    std::unique_ptr<duckdb::QueryResult> r = con.SendQuery(ToSql(source));
-    std::unique_ptr<duckdb::DataChunk> d = r->FetchRaw();
+    duckdb::unique_ptr<duckdb::QueryResult> r = con.SendQuery(ToSql(source));
+    duckdb::unique_ptr<duckdb::DataChunk> d = r->FetchRaw();
     while (d) {
       if (print) {
         d->Print();
