@@ -179,7 +179,8 @@ std::string ToSql(const std::string& source) {
   return tmp;
 }
 
-int RunQuery(ReadStats* stats, const std::string& source, bool print = true) {
+int RunQuery(ReadStats* stats, const std::string& source, const char* s3addr,
+             int s3port, bool print = true) {
   int nrows = 0;
   duckdb::DBConfig conf;
   conf.file_system = duckdb::make_uniq<MonitoredFileSystem>(
@@ -187,8 +188,10 @@ int RunQuery(ReadStats* stats, const std::string& source, bool print = true) {
   conf.options.maximum_threads = 1;
   duckdb::DuckDB db(nullptr, &conf);
   {
+    char tmp[100];
     duckdb::Connection con(db);
-    con.Query("SET s3_endpoint='127.0.0.1:9000'");
+    snprintf(tmp, sizeof(tmp), "SET s3_endpoint='%s:%d'", s3addr, s3port);
+    con.Query(tmp);
     con.Query("SET s3_region='us-east-1'");
     con.Query("SET s3_url_style='path'");
     con.Query("SET s3_use_ssl=false");
@@ -211,7 +214,7 @@ int RunQuery(ReadStats* stats, const std::string& source, bool print = true) {
 
 class QueryRunner {
  public:
-  explicit QueryRunner(int max_jobs);
+  QueryRunner(int max_jobs, const char* s3addr, int s3port);
   ~QueryRunner();
   void AddTask(const std::string& input_source);
   const ReadStats& stats() const { return stats_; }
@@ -227,6 +230,8 @@ class QueryRunner {
   QueryRunner(const QueryRunner&);
   void operator=(const QueryRunner& other);
   ThreadPool* const pool_;
+  const char* s3addr_;
+  const int s3port_;
   // State below protected by cv_;
   ReadStats stats_;
   int nrows_;  // Total number of rows retrieved
@@ -236,8 +241,10 @@ class QueryRunner {
   int bg_completed_;
 };
 
-QueryRunner::QueryRunner(int max_jobs)
+QueryRunner::QueryRunner(int max_jobs, const char* s3addr, int s3port)
     : pool_(new ThreadPool(max_jobs)),
+      s3addr_(s3addr),
+      s3port_(s3port),
       nrows_(0),
       cv_(&mu_),
       bg_scheduled_(0),
@@ -261,14 +268,14 @@ void QueryRunner::AddTask(const std::string& source) {
 
 void QueryRunner::RunTask(void* arg) {
   Task* const t = static_cast<Task*>(arg);
+  QueryRunner* const me = t->me;
   ReadStats stats;
   int n = 0;
   try {
-    n = RunQuery(&stats, *t->data_source);
+    n = RunQuery(&stats, *t->data_source, me->s3addr_, me->s3port_);
   } catch (const std::exception& e) {
     fprintf(stderr, "Error running query: %s\n", e.what());
   }
-  QueryRunner* const me = t->me;
   {
     MutexLock ml(&me->mu_);
     me->bg_completed_++;
@@ -292,8 +299,9 @@ QueryRunner::~QueryRunner() {
 
 }  // namespace ocs
 
-void process_queries(const std::vector<std::string>& sources, int j) {
-  ocs::QueryRunner runner(j);
+void process_queries(const std::vector<std::string>& sources, int j,
+                     const char* s3addr, int s3port) {
+  ocs::QueryRunner runner(j, s3addr, s3port);
   const uint64_t start = CurrentMicros();
   for (const std::string& source : sources) {
     runner.AddTask(source);
@@ -313,12 +321,15 @@ void process_queries(const std::vector<std::string>& sources, int j) {
 }
 
 int main(int argc, char* argv[]) {
+  char s3addr[] = "127.0.0.1";
+  int s3port = 9000;
+  int j = 4;
   std::vector<std::string> sources;
   std::string input;
   while (std::cin >> input) {
     sources.push_back(input);
   }
   std::shuffle(sources.begin(), sources.end(), std::default_random_engine(1));
-  process_queries(sources, 1);
+  process_queries(sources, j, s3addr, s3port);
   return 0;
 }
