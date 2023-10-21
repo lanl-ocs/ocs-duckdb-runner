@@ -230,7 +230,7 @@ class QueryRunner {
   QueryRunner(const QueryRunner&);
   void operator=(const QueryRunner& other);
   ThreadPool* const pool_;
-  const char* s3addr_;
+  const char* const s3addr_;
   const int s3port_;
   // State below protected by cv_;
   ReadStats stats_;
@@ -302,16 +302,16 @@ QueryRunner::~QueryRunner() {
 void process_queries(const std::vector<std::string>& sources, int j,
                      const char* s3addr, int s3port) {
   ocs::QueryRunner runner(j, s3addr, s3port);
-  const uint64_t start = CurrentMicros();
+  const uint64_t t0 = CurrentMicros();
   for (const std::string& source : sources) {
     runner.AddTask(source);
   }
   runner.Wait();
-  const uint64_t end = CurrentMicros();
+  const uint64_t t1 = CurrentMicros();
   fprintf(stderr, "Number data sources (parquet files): %d\n",
           int(sources.size()));
   fprintf(stderr, "Threads: %d\n", j);
-  fprintf(stderr, "Total Query time: %.2f s\n", double(end - start) / 1000000);
+  fprintf(stderr, "Total Query time: %.2f s\n", double(t1 - t0) / 1000000);
   fprintf(stderr, "Total hits: %d\n", runner.TotalRows());
   fprintf(stderr, "Total duckdb read ops: %lld\n",
           static_cast<long long unsigned>(runner.stats().read_ops));
