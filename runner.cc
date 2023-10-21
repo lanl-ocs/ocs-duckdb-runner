@@ -32,6 +32,7 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 #include "pthread-helper.h"
+#include "time.h"
 
 #include <duckdb.hpp>
 #include <duckdb/common/virtual_file_system.hpp>
@@ -205,12 +206,106 @@ int RunQuery(ReadStats* stats, const std::string& source, bool print = true) {
   return nrows;
 }
 
+class QueryRunner {
+ public:
+  explicit QueryRunner(int max_jobs);
+  ~QueryRunner();
+  void AddTask(const std::string& input_source);
+  const ReadStats& stats() const { return stats_; }
+  int TotalRows() const { return nrows_; }
+  void Wait();
+
+ private:
+  struct Task {
+    QueryRunner* me;
+    std::string input_file;
+  };
+  static void RunTask(void*);
+  QueryRunner(const QueryRunner&);
+  void operator=(const QueryRunner& other);
+  ThreadPool* const pool_;
+  // State below protected by cv_;
+  ReadStats stats_;
+  int nrows_;  // Total number of rows retrieved
+  port::Mutex mu_;
+  port::CondVar cv_;
+  int bg_scheduled_;
+  int bg_completed_;
+};
+
+QueryRunner::QueryRunner(int max_jobs)
+    : pool_(new ThreadPool(max_jobs)),
+      nrows_(0),
+      cv_(&mu_),
+      bg_scheduled_(0),
+      bg_completed_(0) {}
+
+void QueryRunner::Wait() {
+  MutexLock ml(&mu_);
+  while (bg_completed_ < bg_scheduled_) {
+    cv_.Wait();
+  }
+}
+
+void QueryRunner::AddTask(const std::string& input_file) {
+  Task* const t = new Task;
+  t->me = this;
+  t->input_file = input_file;
+  MutexLock ml(&mu_);
+  bg_scheduled_++;
+  pool_->Schedule(RunTask, t);
+}
+
+void QueryRunner::RunTask(void* arg) {
+  Task* const t = static_cast<Task*>(arg);
+  ReadStats stats;
+  int n = 0;
+  try {
+    n = RunQuery(&stats, t->input_file);
+  } catch (const std::exception& e) {
+    fprintf(stderr, "Error running query: %s\n", e.what());
+  }
+  QueryRunner* const me = t->me;
+  {
+    MutexLock ml(&me->mu_);
+    me->bg_completed_++;
+    me->stats_.read_bytes += stats.read_bytes;
+    me->stats_.read_ops += stats.read_ops;
+    me->nrows_ += n;
+    me->cv_.SignalAll();
+  }
+  delete t;
+}
+
+QueryRunner::~QueryRunner() {
+  {
+    MutexLock ml(&mu_);
+    while (bg_completed_ < bg_scheduled_) {
+      cv_.Wait();
+    }
+  }
+  delete pool_;
+}
+
 }  // namespace ocs
 
+void process_queries(int j) {
+  ocs::QueryRunner runner(j);
+  const uint64_t start = CurrentMicros();
+  runner.AddTask("read_parquet('s3://ocs/xx_036785.parquet')");
+  runner.Wait();
+  const uint64_t end = CurrentMicros();
+  fprintf(stderr, "Threads: %d\n", j);
+  fprintf(stderr, "Query time: %.2f s\n", double(end - start) / 1000000);
+  fprintf(stderr, "Total rows: %d\n", runner.TotalRows());
+  fprintf(stderr, "Total read ops: %lld\n",
+          static_cast<long long unsigned>(runner.stats().read_ops));
+  fprintf(stderr, "Total read bytes: %lld\n",
+          static_cast<long long unsigned>(runner.stats().read_bytes));
+  fprintf(stderr, "Done\n");
+}
+
 int main() {
-  ocs::ReadStats stats;
-  ocs::RunQuery(&stats, "read_parquet('s3://ocs/xx_036785.parquet')");
-  printf("ops: %llu\n", stats.read_ops);
-  printf("bytes: %llu\n", stats.read_bytes);
+  process_queries(1);
   return 0;
 }
