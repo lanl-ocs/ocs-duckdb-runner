@@ -37,6 +37,9 @@
 #include <duckdb.hpp>
 #include <duckdb/common/virtual_file_system.hpp>
 
+#include <algorithm>
+#include <iostream>
+#include <random>
 #include <stdio.h>
 
 namespace ocs {
@@ -218,7 +221,7 @@ class QueryRunner {
  private:
   struct Task {
     QueryRunner* me;
-    std::string input_file;
+    const std::string* data_source;
   };
   static void RunTask(void*);
   QueryRunner(const QueryRunner&);
@@ -247,10 +250,10 @@ void QueryRunner::Wait() {
   }
 }
 
-void QueryRunner::AddTask(const std::string& input_file) {
+void QueryRunner::AddTask(const std::string& source) {
   Task* const t = new Task;
   t->me = this;
-  t->input_file = input_file;
+  t->data_source = &source;
   MutexLock ml(&mu_);
   bg_scheduled_++;
   pool_->Schedule(RunTask, t);
@@ -261,7 +264,7 @@ void QueryRunner::RunTask(void* arg) {
   ReadStats stats;
   int n = 0;
   try {
-    n = RunQuery(&stats, t->input_file);
+    n = RunQuery(&stats, *t->data_source);
   } catch (const std::exception& e) {
     fprintf(stderr, "Error running query: %s\n", e.what());
   }
@@ -289,23 +292,33 @@ QueryRunner::~QueryRunner() {
 
 }  // namespace ocs
 
-void process_queries(int j) {
+void process_queries(const std::vector<std::string>& sources, int j) {
   ocs::QueryRunner runner(j);
   const uint64_t start = CurrentMicros();
-  runner.AddTask("read_parquet('s3://ocs/xx_036785.parquet')");
+  for (const std::string& source : sources) {
+    runner.AddTask(source);
+  }
   runner.Wait();
   const uint64_t end = CurrentMicros();
+  fprintf(stderr, "Number data sources (parquet files): %d\n",
+          int(sources.size()));
   fprintf(stderr, "Threads: %d\n", j);
-  fprintf(stderr, "Query time: %.2f s\n", double(end - start) / 1000000);
-  fprintf(stderr, "Total rows: %d\n", runner.TotalRows());
-  fprintf(stderr, "Total read ops: %lld\n",
+  fprintf(stderr, "Total Query time: %.2f s\n", double(end - start) / 1000000);
+  fprintf(stderr, "Total hits: %d\n", runner.TotalRows());
+  fprintf(stderr, "Total duckdb read ops: %lld\n",
           static_cast<long long unsigned>(runner.stats().read_ops));
-  fprintf(stderr, "Total read bytes: %lld\n",
+  fprintf(stderr, "Total duckdb read bytes: %lld\n",
           static_cast<long long unsigned>(runner.stats().read_bytes));
   fprintf(stderr, "Done\n");
 }
 
-int main() {
-  process_queries(1);
+int main(int argc, char* argv[]) {
+  std::vector<std::string> sources;
+  std::string input;
+  while (std::cin >> input) {
+    sources.push_back(input);
+  }
+  std::shuffle(sources.begin(), sources.end(), std::default_random_engine(1));
+  process_queries(sources, 1);
   return 0;
 }
