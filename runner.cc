@@ -38,9 +38,11 @@
 #include <duckdb/common/virtual_file_system.hpp>
 
 #include <algorithm>
+#include <getopt.h>
 #include <iostream>
 #include <random>
 #include <stdio.h>
+#include <stdlib.h>
 
 namespace ocs {
 
@@ -299,6 +301,17 @@ QueryRunner::~QueryRunner() {
 
 }  // namespace ocs
 
+void usage(char* argv0, const char* msg) {
+  if (msg) fprintf(stderr, "%s: %s\n", argv0, msg);
+  fprintf(stderr, "==============\n");
+  fprintf(stderr, "usage: %s [options]\n\n", argv0);
+  fprintf(stderr, "-a      address      :  s3 web address\n");
+  fprintf(stderr, "-p      port         :  s3 port\n");
+  fprintf(stderr, "-j      threads      :  num query thread\n");
+  fprintf(stderr, "==============\n");
+  exit(EXIT_FAILURE);
+}
+
 void process_queries(const std::vector<std::string>& sources, int j,
                      const char* s3addr, int s3port) {
   ocs::QueryRunner runner(j, s3addr, s3port);
@@ -321,9 +334,27 @@ void process_queries(const std::vector<std::string>& sources, int j,
 }
 
 int main(int argc, char* argv[]) {
-  char s3addr[] = "127.0.0.1";
+  char localhost[] = "127.0.0.1";
+  char* s3addr = localhost;
   int s3port = 9000;
   int j = 4;
+  int c;
+  while ((c = getopt(argc, argv, "a:j:p:h")) != -1) {
+    switch (c) {
+      case 'a':
+        s3addr = optarg;
+        break;
+      case 'p':
+        s3port = atoi(optarg);
+        break;
+      case 'j':
+        j = atoi(optarg);
+        break;
+      case 'h':
+      default:
+        usage(argv[0], nullptr);
+    }
+  }
   std::vector<std::string> sources;
   std::string input;
   while (std::cin >> input) {
