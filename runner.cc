@@ -1,7 +1,44 @@
+/*
+ * Copyright (c) 2021 Triad National Security, LLC, as operator of Los Alamos
+ * National Laboratory with the U.S. Department of Energy/National Nuclear
+ * Security Administration. All Rights Reserved.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * with the Software without restriction, including without limitation the
+ * rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+ * sell copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * 1. Redistributions of source code must retain the above copyright notice,
+ *    this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright notice,
+ *    this list of conditions and the following disclaimer in the documentation
+ *    and/or other materials provided with the distribution.
+ * 3. Neither the name of TRIAD, Los Alamos National Laboratory, LANL, the
+ *    U.S. Government, nor the names of its contributors may be used to endorse
+ *    or promote products derived from this software without specific prior
+ *    written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS "AS IS" AND ANY EXPRESS OR
+ * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+ * MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO
+ * EVENT SHALL THE COPYRIGHT HOLDERS OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT,
+ * INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+ * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+ * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+ * ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+ * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
+#include "pthread-helper.h"
+
 #include <duckdb.hpp>
 #include <duckdb/common/virtual_file_system.hpp>
 
 #include <stdio.h>
+
+namespace ocs {
 
 struct ReadStats {
   ReadStats() : read_ops(0), read_bytes(0) {}
@@ -101,7 +138,7 @@ class MonitoredFileSystem : public duckdb::FileSystem {
     return h->base_->OnDiskFile();
   }
 
-  unsigned long long GetTotalReadOps() const {
+  uint64_t GetTotalReadOps() const {
     uint64_t ops = 0;
     for (ReadStats* it : stats_) {
       ops += it->read_ops;
@@ -109,7 +146,7 @@ class MonitoredFileSystem : public duckdb::FileSystem {
     return ops;
   }
 
-  unsigned long long GetTotalReadBytes() const {
+  uint64_t GetTotalReadBytes() const {
     uint64_t bytes = 0;
     for (ReadStats* it : stats_) {
       bytes += it->read_bytes;
@@ -128,12 +165,22 @@ class MonitoredFileSystem : public duckdb::FileSystem {
   duckdb::unique_ptr<duckdb::FileSystem> base_;
 };
 
-int main() {
+std::string ToSql(const std::string& source) {
+  char tmp[500];
+  snprintf(tmp, sizeof(tmp),
+           "SELECT min(vertex_id) AS VID, min(x) as X, min(y) as Y, min(z) as "
+           "Z, avg(e) AS E FROM %s WHERE x > 1.5 AND x < 1.6 AND y > 1.5 AND "
+           "y < 1.6 AND z > 1.5 AND z < 1.6 GROUP BY vertex_id ORDER BY E;",
+           source.c_str());
+  return tmp;
+}
+
+int RunQuery(ReadStats* stats, const std::string& source, bool print = true) {
+  int nrows = 0;
   duckdb::DBConfig conf;
   conf.file_system = duckdb::make_uniq<MonitoredFileSystem>(
       duckdb::make_uniq<duckdb::VirtualFileSystem>());
-  conf.options.autoinstall_known_extensions =
-      conf.options.autoload_known_extensions = true;
+  conf.options.maximum_threads = 1;
   duckdb::DuckDB db(nullptr, &conf);
   {
     duckdb::Connection con(db);
@@ -141,18 +188,29 @@ int main() {
     con.Query("SET s3_region='us-east-1'");
     con.Query("SET s3_url_style='path'");
     con.Query("SET s3_use_ssl=false");
-    std::unique_ptr<duckdb::QueryResult> r = con.SendQuery(
-        "SELECT element_id FROM read_parquet('s3://ocs/xx_036785.parquet') "
-        "LIMIT 10");
+    std::unique_ptr<duckdb::QueryResult> r = con.SendQuery(ToSql(source));
     std::unique_ptr<duckdb::DataChunk> d = r->FetchRaw();
     while (d) {
-      d->Print();
+      if (print) {
+        d->Print();
+      }
+      nrows += int(d->size());
       d = r->FetchRaw();
     }
   }
   MonitoredFileSystem& fs =
       static_cast<MonitoredFileSystem&>(db.GetFileSystem());
-  printf("ops: %llu\n", fs.GetTotalReadOps());
-  printf("bytes: %llu\n", fs.GetTotalReadBytes());
+  stats->read_bytes = fs.GetTotalReadBytes();
+  stats->read_ops = fs.GetTotalReadOps();
+  return nrows;
+}
+
+}  // namespace ocs
+
+int main() {
+  ocs::ReadStats stats;
+  ocs::RunQuery(&stats, "read_parquet('s3://ocs/xx_036785.parquet')");
+  printf("ops: %llu\n", stats.read_ops);
+  printf("bytes: %llu\n", stats.read_bytes);
   return 0;
 }
