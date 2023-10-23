@@ -330,6 +330,12 @@ void process_queries(const std::vector<std::string>& sources, int j,
           static_cast<long long unsigned>(runner.stats().read_ops));
   fprintf(stderr, "Total duckdb read bytes: %lld\n",
           static_cast<long long unsigned>(runner.stats().read_bytes));
+  fprintf(stderr, "... in KBs: %.2f\n",
+          static_cast<double>(runner.stats().read_bytes) / 1000);
+  fprintf(stderr, "... in MBs: %.2f\n",
+          static_cast<double>(runner.stats().read_bytes) / 1000 / 1000);
+  fprintf(stderr, "... in GBs: %.2f\n",
+          static_cast<double>(runner.stats().read_bytes) / 1000 / 1000 / 1000);
   fprintf(stderr, "Done\n");
 }
 
