@@ -20,7 +20,7 @@ XXXX XX            XX XX          XX XXXXXXXXXX   XX       XX XX            XXXX
 
 # Step 1: Compile DuckDB and Install It
 
-It is easier to compile from source rather than installing a prebuilt version of duckdb. This is because the prebuilt version shipped by duckdb does not have the httpfs extension that is needed for reading data from s3. While duckdb supports dynamic extension installation and load, it is in general easier if duckdb is statically built and linked with that extension so that we don't need to dynamically install and load it, which will require internet connection.
+In general, it is easier to compile duckdb from source rather than installing a prebuilt version of it. This is because that the prebuilt version shipped by duckdb does not include the httpfs extension needed for reading data from s3. While duckdb supports dynamic extension installation and load, it is in general easier if duckdb is statically built and linked with that extension already so that we don't need to dynamically install and load it, which will require internet connection and increase query latency.
 
 Building duckdb from source requires a g++ compiler, make, cmake, git, and openssl.
 
