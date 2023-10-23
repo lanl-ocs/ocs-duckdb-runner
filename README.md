@@ -90,3 +90,7 @@ Done
 ```
 
 Use `./duckdb-runner 1>/dev/null` to discard query results.
+
+# Notes
+
+It is currently assumed that the s3 http server uses http not https. In future, this can be made configurable. DuckDB will try to cache the metadata information of each s3 object to reduce the number of HEAD requests it must issue. This cache can be disabled. It is currently not disabled because each our query will target a different parquet object anyway, making this cache effectively useless.
