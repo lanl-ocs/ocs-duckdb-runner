@@ -89,3 +89,4 @@ Total duckdb read bytes: 46383122
 Done
 ```
 
+Use `./duckdb-runner 1>/dev/null` to discard query results.
