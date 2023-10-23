@@ -201,7 +201,7 @@ int RunQuery(ReadStats* stats, const std::string& source, const char* s3addr,
     duckdb::unique_ptr<duckdb::DataChunk> d = r->FetchRaw();
     while (d) {
       if (print) {
-        d->Print();
+        std::cout << d->ToString();
       }
       nrows += int(d->size());
       d = r->FetchRaw();
