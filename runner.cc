@@ -323,7 +323,7 @@ void usage(char* argv0, const char* msg) {
   fprintf(stderr, "==============\n");
   fprintf(stderr, "usage: %s [options]\n\n", argv0);
   fprintf(stderr, "-i      id           :  s3 access key id\n");
-  fprintf(stderr, "-k      key          :  s3 access secret key\n");
+  fprintf(stderr, "-k      key          :  s3 secret access key\n");
   fprintf(stderr, "-a      address      :  s3 web address\n");
   fprintf(stderr, "-p      port         :  s3 port\n");
   fprintf(stderr, "-j      threads      :  num query thread\n");
