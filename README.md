@@ -61,14 +61,14 @@ $./duckdb-runner -h
 usage: ./duckdb-runner [options]
 
 -i      id           :  s3 access key id
--k      key          :  s3 access secret key
+-k      key          :  s3 secret access key
 -a      address      :  s3 web address
 -p      port         :  s3 port
 -j      threads      :  num query thread
 ==============
 ```
 
-A test run where we have a minio instance running at 127.0.0.1:9000, a precreated bucket `ocs`, and a preinserted parquet file object `xx_036785.parquet`. See https://github.com/lanl-ocs/laghos-sample-dataset for data scheme and query information.
+A test run where we have a minio instance running at 127.0.0.1:9000, a precreated bucket `ocs`, and a preinserted, publicly accessilble parquet file object `xx_036785.parquet`. See https://github.com/lanl-ocs/laghos-sample-dataset for data scheme and query information.
 
 ```bash
 $./duckdb-runner -a 127.0.0.1 -p 9000 -j 4 <<EOF
@@ -91,7 +91,7 @@ Total duckdb read bytes: 46383122
 Done
 ```
 
-Use `./duckdb-runner 1>/dev/null` to discard query results.
+Use `./duckdb-runner 1>/dev/null` to discard query results. Use `./duckdb-runner -i xx -k yy` to specify s3 access key id and secret access key when authentication is needed for access.
 
 # Notes
 
