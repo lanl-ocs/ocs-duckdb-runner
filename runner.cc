@@ -181,8 +181,18 @@ std::string ToSql(const std::string& source) {
   return tmp;
 }
 
-int RunQuery(ReadStats* stats, const std::string& source, const char* s3addr,
-             int s3port, bool print = true) {
+struct S3Options {
+  S3Options() : s3id(NULL), s3key(NULL), s3addr("127.0.0.1"), s3port(9000) {}
+  // Access key ID
+  const char* s3id;
+  // Secret key
+  const char* s3key;
+  const char* s3addr;
+  int s3port;
+};
+
+int RunQuery(ReadStats* stats, const S3Options& opts, const std::string& source,
+             bool print = true) {
   int nrows = 0;
   duckdb::DBConfig conf;
   conf.file_system = duckdb::make_uniq<MonitoredFileSystem>(
@@ -192,11 +202,20 @@ int RunQuery(ReadStats* stats, const std::string& source, const char* s3addr,
   {
     char tmp[100];
     duckdb::Connection con(db);
-    snprintf(tmp, sizeof(tmp), "SET s3_endpoint='%s:%d'", s3addr, s3port);
+    snprintf(tmp, sizeof(tmp), "SET s3_endpoint='%s:%d'", opts.s3addr,
+             opts.s3port);
     con.Query(tmp);
     con.Query("SET s3_region='us-east-1'");
     con.Query("SET s3_url_style='path'");
     con.Query("SET s3_use_ssl=false");
+    if (opts.s3id) {
+      snprintf(tmp, sizeof(tmp), "SET s3_access_key_id='%s'", opts.s3id);
+      con.Query(tmp);
+    }
+    if (opts.s3key) {
+      snprintf(tmp, sizeof(tmp), "SET s3_secret_access_key='%s'", opts.s3key);
+      con.Query(tmp);
+    }
     duckdb::unique_ptr<duckdb::QueryResult> r = con.SendQuery(ToSql(source));
     duckdb::unique_ptr<duckdb::DataChunk> d = r->FetchRaw();
     while (d) {
@@ -216,7 +235,7 @@ int RunQuery(ReadStats* stats, const std::string& source, const char* s3addr,
 
 class QueryRunner {
  public:
-  QueryRunner(int max_jobs, const char* s3addr, int s3port);
+  QueryRunner(const S3Options& s3options, int max_jobs);
   ~QueryRunner();
   void AddTask(const std::string& input_source);
   const ReadStats& stats() const { return stats_; }
@@ -232,8 +251,7 @@ class QueryRunner {
   QueryRunner(const QueryRunner&);
   void operator=(const QueryRunner& other);
   ThreadPool* const pool_;
-  const char* const s3addr_;
-  const int s3port_;
+  const S3Options s3opts_;
   // State below protected by cv_;
   ReadStats stats_;
   int nrows_;  // Total number of rows retrieved
@@ -243,10 +261,9 @@ class QueryRunner {
   int bg_completed_;
 };
 
-QueryRunner::QueryRunner(int max_jobs, const char* s3addr, int s3port)
+QueryRunner::QueryRunner(const S3Options& s3options, int max_jobs)
     : pool_(new ThreadPool(max_jobs)),
-      s3addr_(s3addr),
-      s3port_(s3port),
+      s3opts_(s3options),
       nrows_(0),
       cv_(&mu_),
       bg_scheduled_(0),
@@ -274,7 +291,7 @@ void QueryRunner::RunTask(void* arg) {
   ReadStats stats;
   int n = 0;
   try {
-    n = RunQuery(&stats, *t->data_source, me->s3addr_, me->s3port_);
+    n = RunQuery(&stats, me->s3opts_, *t->data_source);
   } catch (const std::exception& e) {
     fprintf(stderr, "Error running query: %s\n", e.what());
   }
@@ -305,6 +322,8 @@ void usage(char* argv0, const char* msg) {
   if (msg) fprintf(stderr, "%s: %s\n", argv0, msg);
   fprintf(stderr, "==============\n");
   fprintf(stderr, "usage: %s [options]\n\n", argv0);
+  fprintf(stderr, "-i      id           :  s3 access key id\n");
+  fprintf(stderr, "-k      key          :  s3 access secret key\n");
   fprintf(stderr, "-a      address      :  s3 web address\n");
   fprintf(stderr, "-p      port         :  s3 port\n");
   fprintf(stderr, "-j      threads      :  num query thread\n");
@@ -313,8 +332,8 @@ void usage(char* argv0, const char* msg) {
 }
 
 void process_queries(const std::vector<std::string>& sources, int j,
-                     const char* s3addr, int s3port) {
-  ocs::QueryRunner runner(j, s3addr, s3port);
+                     const ocs::S3Options& s3options) {
+  ocs::QueryRunner runner(s3options, j);
   const uint64_t t0 = CurrentMicros();
   for (const std::string& source : sources) {
     runner.AddTask(source);
@@ -340,21 +359,25 @@ void process_queries(const std::vector<std::string>& sources, int j,
 }
 
 int main(int argc, char* argv[]) {
-  char localhost[] = "127.0.0.1";
-  char* s3addr = localhost;
-  int s3port = 9000;
+  ocs::S3Options s3options;
   int j = 4;
   int c;
-  while ((c = getopt(argc, argv, "a:j:p:h")) != -1) {
+  while ((c = getopt(argc, argv, "a:i:j:k:p:h")) != -1) {
     switch (c) {
       case 'a':
-        s3addr = optarg;
+        s3options.s3addr = optarg;
         break;
-      case 'p':
-        s3port = atoi(optarg);
+      case 'i':
+        s3options.s3id = optarg;
         break;
       case 'j':
         j = atoi(optarg);
+        break;
+      case 'k':
+        s3options.s3key = optarg;
+        break;
+      case 'p':
+        s3options.s3port = atoi(optarg);
         break;
       case 'h':
       default:
@@ -367,6 +390,6 @@ int main(int argc, char* argv[]) {
     sources.push_back(input);
   }
   std::shuffle(sources.begin(), sources.end(), std::default_random_engine(1));
-  process_queries(sources, j, s3addr, s3port);
+  process_queries(sources, j, s3options);
   return 0;
 }
