@@ -56,10 +56,12 @@ make -j
 The idea is that the runner will read input parquet file object addresses from stdin (**one address per line**) and launch a duckdb instance per parquet file using a thread pool. Detailed usage information below. We can configure s3 endpoint and the number of threads in the thread pool. Default thread count is 4.
 
 ```bash
-$./duckdb-runner -h   
+$./duckdb-runner -h
 ==============
 usage: ./duckdb-runner [options]
 
+-i      id           :  s3 access key id
+-k      key          :  s3 access secret key
 -a      address      :  s3 web address
 -p      port         :  s3 port
 -j      threads      :  num query thread
